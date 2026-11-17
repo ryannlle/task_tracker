@@ -333,10 +333,7 @@
     ];
     $("#stats").innerHTML = cells.map(([label, value, alert]) => `<div class="${alert ? "is-alert" : ""}"><dt>${label}</dt><dd>${value}</dd></div>`).join("");
 
-    const dueToday = open.filter((x) => x.due === t).length;
-    $("#hero-live").innerHTML = state.tasks.length
-      ? `Right now: <strong>${open.length}</strong> open ${open.length === 1 ? "task" : "tasks"}, <strong>${dueToday}</strong> due today${overdue ? `, <strong>${overdue}</strong> overdue` : ""}.`
-      : "Your planner is empty — add your first task below.";
+    $("#tab-count-tasks").textContent = open.length ? String(open.length) : "";
   }
 
   function renderTasks() {
@@ -745,7 +742,6 @@
     savePrefs();
     renderTasks();
   }
-  $$("[data-layout-link]").forEach((a) => a.addEventListener("click", () => setLayout(a.dataset.layoutLink)));
 
   $("#clear-done").addEventListener("click", () => {
     const n = state.tasks.filter((t) => t.status === "done").length;
@@ -896,54 +892,65 @@
     if (e.key === STORE_KEY) { state.tasks = (storage.get(STORE_KEY, []) || []).map(normalizeTask).filter(Boolean); renderAll(); }
   });
 
-  /* ---------- Header: mobile menu + active section ---------- */
-  const nav = $("#site-nav"), menuBtn = $("#menu-btn");
-  menuBtn.addEventListener("click", () => {
-    const open = menuBtn.getAttribute("aria-expanded") !== "true";
-    menuBtn.setAttribute("aria-expanded", String(open));
-    nav.classList.toggle("is-open", open);
-  });
-  nav.addEventListener("click", (e) => {
-    if (e.target.closest("a")) { menuBtn.setAttribute("aria-expanded", "false"); nav.classList.remove("is-open"); }
-  });
-  const navLinks = $$(".site-nav a");
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) return;
-      navLinks.forEach((a) => a.setAttribute("aria-current", String(a.getAttribute("href") === `#${entry.target.id}`)));
+  /* ---------- Views (hash routing: #tasks, #calendar) ---------- */
+  const VIEWS = ["tasks", "calendar"];
+  function showView(view, { updateHash = true } = {}) {
+    if (!VIEWS.includes(view)) view = "tasks";
+    VIEWS.forEach((v) => { document.getElementById(v).hidden = v !== view; });
+    $$("[data-view-link]").forEach((a) => {
+      if (a.dataset.viewLink === view) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
     });
-  }, { rootMargin: "-45% 0px -50% 0px" });
-  ["app", "calendar", "features", "how", "faq"].forEach((id) => observer.observe(document.getElementById(id)));
+    if (updateHash && location.hash !== `#${view}`) history.replaceState(null, "", `#${view}`);
+    scrollTo(0, 0);
+  }
+  addEventListener("hashchange", () => showView(location.hash.slice(1), { updateHash: false }));
+  $$("[data-view-link]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    showView(a.dataset.viewLink);
+  }));
+  $(".brand").addEventListener("click", (e) => { e.preventDefault(); showView("tasks"); });
+
+  /* ---------- More options panel ---------- */
+  const panel = $("#more-panel");
+  // close the panel before a panel item opens a dialog
+  panel.addEventListener("click", (e) => {
+    if (e.target.closest("[data-panel-item]")) { try { panel.hidePopover(); } catch {} }
+  }, true);
+  panel.addEventListener("toggle", (e) => {
+    $("#more-btn").setAttribute("aria-expanded", String(e.newState === "open"));
+    if (e.newState === "open") panel.querySelector("button")?.focus();
+  });
 
   /* ---------- Keyboard shortcuts ---------- */
   document.addEventListener("keydown", (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target;
-    if (t.closest("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open]")) return;
+    if (t.closest("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open], :popover-open")) return;
     const k = e.key.toLowerCase();
-    const go = (id) => document.getElementById(id).scrollIntoView({ block: "start" });
-    if (k === "n") { e.preventDefault(); go("app"); $("#new-title").focus({ preventScroll: true }); }
-    else if (e.key === "/") { e.preventDefault(); go("app"); $("#search").focus({ preventScroll: true }); }
-    else if (k === "c") go("calendar");
-    else if (k === "d" || k === "w" || k === "m") { setCalMode({ d: "day", w: "week", m: "month" }[k]); go("calendar"); }
-    else if (k === "b") setLayout(state.layout === "list" ? "board" : "list");
+    if (k === "n") { e.preventDefault(); showView("tasks"); $("#new-title").focus(); }
+    else if (e.key === "/") { e.preventDefault(); showView("tasks"); $("#search").focus(); }
+    else if (k === "t") showView("tasks");
+    else if (k === "c") showView("calendar");
+    else if (k === "d" || k === "w" || k === "m") { setCalMode({ d: "day", w: "week", m: "month" }[k]); showView("calendar"); }
+    else if (k === "b") { showView("tasks"); setLayout(state.layout === "list" ? "board" : "list"); }
     else if (e.key === "?") openDialog($("#shortcuts-dialog"));
   });
 
   /* ---------- Init ---------- */
   $("#sort").value = state.sort;
   $$('#layout-toggle input').forEach((r) => (r.checked = r.value === state.layout));
-  $("#today-label").textContent = fmt(new Date(), { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  $("#year").textContent = new Date().getFullYear();
+  $("#today-label").textContent = fmt(new Date(), { weekday: "short", month: "short", day: "numeric" });
   if (!Array.isArray(storage.get(STORE_KEY, null))) save();
   renderAll();
+  showView(location.hash.slice(1) || "tasks", { updateHash: !!location.hash });
 
   // keep "today" accurate if the tab stays open past midnight
   let lastDay = todayKey();
   setInterval(() => {
     if (todayKey() !== lastDay) {
       lastDay = todayKey();
-      $("#today-label").textContent = fmt(new Date(), { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+      $("#today-label").textContent = fmt(new Date(), { weekday: "short", month: "short", day: "numeric" });
       renderAll();
     }
   }, 60000);
